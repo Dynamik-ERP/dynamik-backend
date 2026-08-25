@@ -106,17 +106,18 @@ export class AuthController {
   private setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
     const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
     const csrfToken = randomBytes(32).toString('hex');
+    const sameSite = isProduction ? ('none' as const) : ('lax' as const);
     const common = {
       httpOnly: true,
       secure: isProduction,
-      sameSite: 'strict' as const,
+      sameSite,
       path: '/',
     };
     res.cookie('access_token', accessToken, { ...common, maxAge: 15 * 60 * 1000 });
     res.cookie('refresh_token', refreshToken, { ...common, maxAge: 7 * 24 * 60 * 60 * 1000 });
     res.cookie('csrf_token', csrfToken, {
       secure: isProduction,
-      sameSite: 'strict',
+      sameSite,
       path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
