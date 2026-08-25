@@ -1,9 +1,8 @@
-import { IsNotEmpty, IsString, Matches, MinLength } from 'class-validator';
+import { IsNotEmpty, IsString, MinLength } from 'class-validator';
 
 export class ResetPasswordDto {
   @IsNotEmpty()
   @IsString()
-  @MinLength(12)
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#+\-_.])[A-Za-z\d@$!%*?&#+\-_.]{12,}$/)
+  @MinLength(4, { message: 'Password must be at least 4 characters' })
   password: string;
 }
