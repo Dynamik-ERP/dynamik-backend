@@ -18,9 +18,10 @@ export class DesignsController {
   @Roles(UserRole.ADMIN)
   routeDesign(
     @Param('orderId', UuidValidationPipe) orderId: string,
+    @Body('designer_id') bodyDesignerId: string,
     @CurrentUser() user: User,
   ) {
-    return this.designsService.routeDesign(orderId, user.id);
+    return this.designsService.routeDesign(orderId, bodyDesignerId || user.id);
   }
 
   @Get('designs')

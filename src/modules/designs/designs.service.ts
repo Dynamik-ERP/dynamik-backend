@@ -17,22 +17,39 @@ export class DesignsService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  async routeDesign(orderId: string, designerId: string) {
+  async routeDesign(orderId: string, fallbackDesignerId?: string) {
     const order = await this.orderRepo.findOne({ where: { id: orderId } });
     if (!order) {
       throw new NotFoundException('Order not found');
     }
 
-    if (order.status === OrderStatus.DRAFT) {
-      order.status = OrderStatus.IN_PROGRESS;
-      await this.orderRepo.save(order);
+    const designerId = order.handled_by_designer_id || fallbackDesignerId;
+    if (!designerId) {
+      throw new BadRequestException('Order must have an assigned designer before routing to design');
     }
 
-    const design = this.designRepo.create({
-      order_id: orderId,
-      designer_id: designerId,
-      status: DesignStatus.DRAFTING,
-    });
+    if (!order.handled_by_designer_id) {
+      order.handled_by_designer_id = designerId;
+    }
+
+    if (order.status === OrderStatus.DRAFT) {
+      order.status = OrderStatus.IN_PROGRESS;
+    }
+    await this.orderRepo.save(order);
+
+    let design = await this.designRepo.findOne({ where: { order_id: orderId } });
+    if (design) {
+      design.designer_id = designerId;
+      if (design.status === DesignStatus.REVISION_REQUESTED || design.status === DesignStatus.DRAFTING) {
+        design.status = DesignStatus.DRAFTING;
+      }
+    } else {
+      design = this.designRepo.create({
+        order_id: orderId,
+        designer_id: designerId,
+        status: DesignStatus.DRAFTING,
+      });
+    }
 
     const saved = await this.designRepo.save(design);
     this.eventEmitter.emit('design.routed', { orderId, designId: saved.id });
