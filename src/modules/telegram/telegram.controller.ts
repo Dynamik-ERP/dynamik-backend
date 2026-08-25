@@ -14,10 +14,15 @@ export class TelegramController {
     private readonly configService: ConfigService,
   ) {}
 
-  @Post('setup-webhook')
   @Get('setup-webhook')
   @SkipCsrf()
-  setupWebhook() {
+  getSetupWebhook() {
+    return this.telegramService.setupWebhook();
+  }
+
+  @Post('setup-webhook')
+  @SkipCsrf()
+  postSetupWebhook() {
     return this.telegramService.setupWebhook();
   }
 
