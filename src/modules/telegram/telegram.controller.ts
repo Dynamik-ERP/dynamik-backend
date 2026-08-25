@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Headers, HttpCode, HttpStatus, ForbiddenException, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Headers, HttpCode, HttpStatus, ForbiddenException, UseGuards } from '@nestjs/common';
 import { TelegramService } from './telegram.service.js';
 import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
@@ -14,6 +14,13 @@ export class TelegramController {
     private readonly configService: ConfigService,
   ) {}
 
+  @Post('setup-webhook')
+  @Get('setup-webhook')
+  @SkipCsrf()
+  setupWebhook() {
+    return this.telegramService.setupWebhook();
+  }
+
   @Post('webhook')
   @SkipCsrf()
   @HttpCode(HttpStatus.OK)
@@ -22,18 +29,14 @@ export class TelegramController {
     @Headers('X-Telegram-Bot-Api-Secret-Token') secretHeader?: string,
   ) {
     const secretToken = this.configService.get<string>('TELEGRAM_WEBHOOK_SECRET');
-    if (!secretToken) {
-      throw new ForbiddenException('TELEGRAM_WEBHOOK_SECRET is not configured. Webhook processing is disabled.');
-    }
-    if (secretHeader !== secretToken) {
+    if (secretToken && secretHeader !== secretToken) {
       throw new ForbiddenException('Invalid webhook secret token');
     }
 
     if (body.message?.text?.startsWith('/start') && body.message?.chat) {
       const chatId = body.message.chat.id.toString();
       const username = body.message.from?.username;
-      const reply = await this.telegramService.handleStartCommand(chatId, username);
-      await this.telegramService.sendRelayMessage(chatId, reply);
+      await this.telegramService.handleStartCommand(chatId, username);
       return { status: 'ok' };
     }
 
