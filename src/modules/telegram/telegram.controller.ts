@@ -48,6 +48,17 @@ export class TelegramController {
         contact.phone_number,
         contact.first_name,
       );
+      return { status: 'ok' };
+    }
+
+    if (body.message?.text && body.message?.chat) {
+      const chatId = body.message.chat.id.toString();
+      await this.telegramService.handleIncomingMessage(
+        chatId,
+        body.message.text,
+        body.message.message_id,
+      );
+      return { status: 'ok' };
     }
 
     return { status: 'ok' };
