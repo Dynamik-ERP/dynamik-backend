@@ -130,4 +130,14 @@ export class WarehouseService {
     request.status = ApprovalStatus.APPROVED;
     return this.procReqRepo.save(request);
   }
+
+  async listProcurementRequests() {
+    return this.procReqRepo.find({
+      relations: {
+        requestedByUser: true,
+        items: { item: true },
+      },
+      order: { created_at: 'DESC' },
+    });
+  }
 }

@@ -23,6 +23,12 @@ export class DesignsController {
     return this.designsService.routeDesign(orderId, user.id);
   }
 
+  @Get('designs')
+  @Roles(UserRole.ADMIN, UserRole.DESIGN)
+  findAll() {
+    return this.designsService.findAll();
+  }
+
   @Get('orders/:orderId/designs')
   @Roles(UserRole.ADMIN, UserRole.DESIGN)
   findByOrder(@Param('orderId', UuidValidationPipe) orderId: string) {

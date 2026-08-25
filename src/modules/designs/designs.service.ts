@@ -97,4 +97,11 @@ export class DesignsService {
       order: { updated_at: 'DESC' },
     });
   }
+
+  async findAll() {
+    return this.designRepo.find({
+      relations: { designer: true, order: { client: true } },
+      order: { updated_at: 'DESC' },
+    });
+  }
 }

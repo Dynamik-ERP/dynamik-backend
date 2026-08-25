@@ -57,6 +57,12 @@ export class WarehouseController {
     return this.warehouseService.createProcurementRequest(dto, user.id);
   }
 
+  @Get('procurement-requests')
+  @Roles(UserRole.WAREHOUSE, UserRole.ADMIN)
+  listProcurementRequests() {
+    return this.warehouseService.listProcurementRequests();
+  }
+
   @Post('procurement-requests/:id/approve')
   @Roles(UserRole.ADMIN)
   approveProcurementRequest(@Param('id', UuidValidationPipe) id: string) {
