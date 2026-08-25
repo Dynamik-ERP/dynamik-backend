@@ -49,6 +49,26 @@ export class SchedulingService {
     });
   }
 
+  async getCuttingLists(page = 1, limit = 50) {
+    const [data, total] = await this.cuttingListRepo.findAndCount({
+      relations: { order: true, createdByUser: true, decidedByUser: true },
+      order: { created_at: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    return { data, total, page, limit };
+  }
+
+  async getBom(page = 1, limit = 50) {
+    const [data, total] = await this.bomRepo.findAndCount({
+      relations: { order: true },
+      order: { updated_at: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    return { data, total, page, limit };
+  }
+
   async createCuttingList(dto: CreateCuttingListDto, createdById: string) {
     const list = this.cuttingListRepo.create({
       order_id: dto.order_id,
