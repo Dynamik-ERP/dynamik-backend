@@ -36,7 +36,10 @@ export class TelegramController {
     if (body.message?.text?.startsWith('/start') && body.message?.chat) {
       const chatId = body.message.chat.id.toString();
       const username = body.message.from?.username;
-      await this.telegramService.handleStartCommand(chatId, username);
+      // Extract deep-link parameter: "/start link_admin" → "link_admin"
+      const parts = body.message.text.trim().split(/\s+/);
+      const deepLinkParam = parts.length > 1 ? parts[1] : undefined;
+      await this.telegramService.handleStartCommand(chatId, username, deepLinkParam);
       return { status: 'ok' };
     }
 

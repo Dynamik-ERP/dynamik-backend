@@ -107,8 +107,78 @@ export class TelegramService implements OnModuleInit {
     return true;
   }
 
-  async handleStartCommand(chatId: string, username?: string): Promise<string> {
+  // ─── Admin & Staff Notification Relay ───────────────────────────────
+  async notifyStaff(message: string, roles: UserRole[] = [UserRole.ADMIN]): Promise<void> {
+    try {
+      const staffUsers = await this.userRepo.find({
+        where: roles.map(role => ({ role, telegram_chat_id: undefined })),
+      });
+      // Filter to only users who actually have a telegram_chat_id
+      const linkedStaff = staffUsers.filter(u => u.telegram_chat_id);
+      if (linkedStaff.length === 0) {
+        this.logger.log(`No staff with linked Telegram found for roles [${roles.join(', ')}]. Skipping notification.`);
+        return;
+      }
+      for (const staff of linkedStaff) {
+        await this.sendRelayMessage(staff.telegram_chat_id!, message);
+      }
+      this.logger.log(`Notified ${linkedStaff.length} staff member(s) via Telegram.`);
+    } catch (err: any) {
+      this.logger.error(`Failed to notify staff: ${err.message}`);
+    }
+  }
+
+  async notifyAdmins(message: string): Promise<void> {
+    // Query admins directly with a proper where clause
+    const admins = await this.userRepo
+      .createQueryBuilder('user')
+      .where('user.role = :role', { role: UserRole.ADMIN })
+      .andWhere('user.telegram_chat_id IS NOT NULL')
+      .getMany();
+
+    for (const admin of admins) {
+      await this.sendRelayMessage(admin.telegram_chat_id!, message);
+    }
+    if (admins.length > 0) {
+      this.logger.log(`Notified ${admins.length} admin(s) via Telegram.`);
+    }
+  }
+
+  async handleStartCommand(chatId: string, username?: string, deepLinkParam?: string): Promise<string> {
     const existingUser = await this.userRepo.findOne({ where: { telegram_chat_id: chatId } });
+
+    // If this is an admin/staff starting the bot, greet them differently
+    if (existingUser && existingUser.role !== UserRole.CLIENT) {
+      const staffWelcome = `👋 Welcome, ${existingUser.full_name}!\n\n🔧 Role: ${existingUser.role.toUpperCase()}\n\nYou are now connected to Dynamik ERP notifications. You will receive real-time alerts here when:\n• New clients register\n• Clients send messages\n• Orders are updated`;
+      await this.sendMessageWithKeyboard(chatId, staffWelcome, { remove_keyboard: true });
+      return staffWelcome;
+    }
+
+    // Deep link: /start link_admin — auto-link the first admin without a telegram_chat_id
+    if (deepLinkParam === 'link_admin') {
+      const unlinkedAdmin = await this.userRepo.findOne({
+        where: { role: UserRole.ADMIN, telegram_chat_id: undefined as any },
+      });
+      // Try query builder for null check
+      const admin = unlinkedAdmin || await this.userRepo
+        .createQueryBuilder('user')
+        .where('user.role = :role', { role: UserRole.ADMIN })
+        .andWhere('user.telegram_chat_id IS NULL')
+        .getOne();
+
+      if (admin) {
+        admin.telegram_chat_id = chatId;
+        await this.userRepo.save(admin);
+        const msg = `✅ Admin account linked!\n\n👤 ${admin.full_name}\n📧 ${admin.email}\n🔧 Role: ADMIN\n\nYou will now receive real-time Telegram notifications for:\n• New client registrations\n• Incoming client messages\n• Order updates`;
+        await this.sendMessageWithKeyboard(chatId, msg, { remove_keyboard: true });
+        return msg;
+      } else {
+        const msg = `⚠️ No unlinked admin account found. All admin accounts are already linked to Telegram.`;
+        await this.sendRelayMessage(chatId, msg);
+        return msg;
+      }
+    }
+
     if (existingUser && existingUser.phone) {
       const welcomeBack = `👋 Welcome back to Dynamik ERP, ${existingUser.full_name}!\n\nYou are connected to our production & design workspace. Type any message or request here to chat directly with your assigned designer and engineering team.`;
       await this.sendMessageWithKeyboard(chatId, welcomeBack, { remove_keyboard: true });
@@ -149,12 +219,14 @@ export class TelegramService implements OnModuleInit {
 
   async handleContactShare(chatId: string, phone: string, firstName: string): Promise<User> {
     let user = await this.userRepo.findOne({ where: { telegram_chat_id: chatId } });
+    let isNewRegistration = false;
     if (!user) {
       user = await this.userRepo.findOne({ where: { phone } });
       if (user) {
         user.telegram_chat_id = chatId;
         await this.userRepo.save(user);
       } else {
+        isNewRegistration = true;
         user = this.userRepo.create({
           full_name: firstName || 'Telegram Client',
           phone,
@@ -182,6 +254,13 @@ export class TelegramService implements OnModuleInit {
 
     const message = `✅ Thank you, ${firstName}! Your account has been registered with Dynamik ERP.\n\n💬 You can now send any questions, measurements, or design requirements directly in this chat!`;
     await this.sendMessageWithKeyboard(chatId, message, { remove_keyboard: true });
+
+    // 🔔 Notify all admins about new client registration
+    const adminNotification = isNewRegistration
+      ? `🆕 New Client Registration\n\n👤 Name: ${firstName}\n📱 Phone: ${phone}\n🆔 ID: ${user.id}\n📋 Order: ${activeOrder.id}`
+      : `🔗 Returning Client Linked\n\n👤 Name: ${user.full_name}\n📱 Phone: ${phone}`;
+    await this.notifyAdmins(adminNotification);
+
     return user;
   }
 
@@ -189,6 +268,12 @@ export class TelegramService implements OnModuleInit {
     let user = await this.userRepo.findOne({ where: { telegram_chat_id: chatId } });
     if (!user) {
       await this.handleStartCommand(chatId);
+      return;
+    }
+
+    // If this is a staff/admin user messaging, don't create client orders — just acknowledge
+    if (user.role !== UserRole.CLIENT) {
+      this.logger.log(`Staff message from ${user.full_name} (${user.role}): ${text}`);
       return;
     }
 
@@ -226,5 +311,10 @@ export class TelegramService implements OnModuleInit {
     });
 
     this.logger.log(`Telegram message from ${user.full_name} (${chatId}) saved to Order ${order.id}`);
+
+    // 🔔 Notify admins about the incoming client message
+    await this.notifyAdmins(
+      `💬 New message from client\n\n👤 ${user.full_name} (${user.phone || 'no phone'})\n📋 Order: ${order.id}\n\n"${text.length > 200 ? text.substring(0, 200) + '...' : text}"`,
+    );
   }
 }
