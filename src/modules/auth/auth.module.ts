@@ -5,6 +5,7 @@ import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service.js';
 import { AuthController } from './auth.controller.js';
+import { RegistrationCodesController } from './registration-codes.controller.js';
 import { JwtStrategy } from './strategies/jwt.strategy.js';
 import { User } from '../../entities/user.entity.js';
 import { RegistrationCode } from '../../entities/registration-code.entity.js';
@@ -22,7 +23,7 @@ import { RegistrationCode } from '../../entities/registration-code.entity.js';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, RegistrationCodesController],
   providers: [AuthService, JwtStrategy],
   exports: [AuthService, JwtModule],
 })
