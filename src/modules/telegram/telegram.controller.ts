@@ -69,6 +69,11 @@ export class TelegramController {
       return { status: 'ok' };
     }
 
+    if (body.callback_query) {
+      await this.telegramService.handleCallbackQuery(body.callback_query);
+      return { status: 'ok' };
+    }
+
     return { status: 'ok' };
   }
 

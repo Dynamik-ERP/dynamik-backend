@@ -5,9 +5,10 @@ import { TelegramController } from './telegram.controller.js';
 import { User } from '../../entities/user.entity.js';
 import { Order } from '../../entities/order.entity.js';
 import { Message } from '../../entities/message.entity.js';
+import { PriceOffer } from '../../entities/price-offer.entity.js';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Order, Message])],
+  imports: [TypeOrmModule.forFeature([User, Order, Message, PriceOffer])],
   controllers: [TelegramController],
   providers: [TelegramService],
   exports: [TelegramService],

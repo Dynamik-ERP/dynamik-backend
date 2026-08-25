@@ -2,11 +2,12 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { User } from '../../entities/user.entity.js';
 import { Order } from '../../entities/order.entity.js';
 import { Message } from '../../entities/message.entity.js';
-import { UserRole, OrderStatus, MessageChannel, MessageType } from '../../entities/enums.js';
+import { PriceOffer } from '../../entities/price-offer.entity.js';
+import { UserRole, OrderStatus, MessageChannel, MessageType, PriceOfferStatus } from '../../entities/enums.js';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
@@ -21,6 +22,8 @@ export class TelegramService implements OnModuleInit {
     private readonly orderRepo: Repository<Order>,
     @InjectRepository(Message)
     private readonly messageRepo: Repository<Message>,
+    @InjectRepository(PriceOffer)
+    private readonly offerRepo: Repository<PriceOffer>,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -74,6 +77,10 @@ export class TelegramService implements OnModuleInit {
   }
 
   async sendRelayMessage(chatId: string, message: string): Promise<boolean> {
+    return this.sendMessageWithKeyboard(chatId, message);
+  }
+
+  async sendMessage(chatId: string, message: string): Promise<boolean> {
     return this.sendMessageWithKeyboard(chatId, message);
   }
 
@@ -330,5 +337,191 @@ export class TelegramService implements OnModuleInit {
     await this.notifyAdmins(
       `💬 New message from client\n\n👤 ${user.full_name} (${user.phone || 'no phone'})\n📋 Order: ${order.id}\n\n"${text.length > 200 ? text.substring(0, 200) + '...' : text}"`,
     );
+  }
+
+  /**
+   * Automatically prepares and sends a formal "I Accept" agreement to the client on Telegram
+   * whenever an admin or designer issues a price offer.
+   */
+  @OnEvent('price-offer.created')
+  async handlePriceOfferCreated(payload: { orderId: string; offerId: string }) {
+    try {
+      const offer = await this.offerRepo.findOne({
+        where: { id: payload.offerId },
+        relations: { order: { client: true } },
+      });
+      if (!offer || !offer.order || !offer.order.client) return;
+
+      const client = offer.order.client;
+      if (!client.telegram_chat_id) {
+        this.logger.log(`Client ${client.full_name} has no telegram_chat_id. Skipping Telegram agreement prompt.`);
+        return;
+      }
+
+      const formattedAmount = Number(offer.amount).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+      const orderShortId = offer.order.id.slice(0, 8).toUpperCase();
+
+      const agreementText =
+        `📋 *PRODUCTION & PRICE AGREEMENT*\n\n` +
+        `Hello ${client.full_name},\n` +
+        `An official quote has been prepared for your order:\n\n` +
+        `🔹 *Order Ref:* \`#${orderShortId}\`\n` +
+        `💰 *Quoted Price:* *$${formattedAmount}*\n\n` +
+        `Please review the quotation above. By pressing *"✅ I Accept Agreement"*, you authorize Dynamik ERP to commence engineering specifications and production.\n\n` +
+        `Press *"💬 Request Revision"* if you need changes before proceeding.`;
+
+      const inlineKeyboard = {
+        inline_keyboard: [
+          [
+            {
+              text: '✅ I Accept Agreement',
+              callback_data: `accept_offer:${offer.id}`,
+            },
+          ],
+          [
+            {
+              text: '💬 Request Revision',
+              callback_data: `revise_offer:${offer.id}`,
+            },
+          ],
+        ],
+      };
+
+      await this.sendMessageWithKeyboard(client.telegram_chat_id, agreementText, inlineKeyboard);
+      this.logger.log(`Sent agreement prompt to client ${client.full_name} (${client.telegram_chat_id}) for Offer ${offer.id}`);
+    } catch (err: any) {
+      this.logger.error(`Failed to send price offer agreement to Telegram: ${err?.message}`);
+    }
+  }
+
+  async handleCallbackQuery(callbackQuery: any): Promise<void> {
+    const callbackQueryId = callbackQuery.id;
+    const data = callbackQuery.data;
+    const chatId = callbackQuery.from?.id?.toString();
+    const messageId = callbackQuery.message?.message_id;
+
+    if (!data || !chatId) return;
+
+    if (data.startsWith('accept_offer:')) {
+      const offerId = data.replace('accept_offer:', '');
+      await this.handleAcceptOfferCallback(chatId, offerId, callbackQueryId, messageId);
+    } else if (data.startsWith('revise_offer:')) {
+      const offerId = data.replace('revise_offer:', '');
+      await this.handleReviseOfferCallback(chatId, offerId, callbackQueryId, messageId);
+    }
+  }
+
+  private async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+    const token = this.configService.get<string>('TELEGRAM_BOT_TOKEN');
+    if (!token) return;
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          callback_query_id: callbackQueryId,
+          text: text || '',
+          show_alert: false,
+        }),
+      });
+    } catch (err: any) {
+      this.logger.warn(`Failed to answer callback query: ${err?.message}`);
+    }
+  }
+
+  private async handleAcceptOfferCallback(
+    chatId: string,
+    offerId: string,
+    callbackQueryId: string,
+    messageId?: number,
+  ) {
+    try {
+      const offer = await this.offerRepo.findOne({
+        where: { id: offerId },
+        relations: { order: { client: true } },
+      });
+
+      if (!offer) {
+        await this.answerCallbackQuery(callbackQueryId, 'Offer not found.');
+        return;
+      }
+
+      if (offer.status === PriceOfferStatus.APPROVED) {
+        await this.answerCallbackQuery(callbackQueryId, 'Agreement already accepted!');
+        return;
+      }
+
+      offer.status = PriceOfferStatus.APPROVED;
+      await this.offerRepo.save(offer);
+
+      // Emit event so orders service and live web dashboards update
+      this.eventEmitter.emit('price-offer.approved', { orderId: offer.order_id, offerId });
+
+      await this.answerCallbackQuery(callbackQueryId, '🎉 Agreement accepted!');
+
+      const orderShortId = offer.order.id.slice(0, 8).toUpperCase();
+      const confirmationText =
+        `🎉 *AGREEMENT CONFIRMED*\n\n` +
+        `Thank you! You have accepted the price agreement for Order \`#${orderShortId}\`.\n\n` +
+        `🚀 Our design & production department has received your confirmation and will begin manufacturing preparations.`;
+
+      await this.sendMessage(chatId, confirmationText);
+
+      // 🔔 Notify all admins in real-time on Telegram
+      const clientName = offer.order.client?.full_name || 'Client';
+      await this.notifyAdmins(
+        `✅ *Agreement Accepted by Client!*\n\n` +
+        `👤 *Client:* ${clientName}\n` +
+        `📋 *Order:* \`#${orderShortId}\`\n` +
+        `💰 *Amount:* $${Number(offer.amount).toLocaleString()}\n` +
+        `Status: Ready for production processing.`,
+      );
+    } catch (err: any) {
+      this.logger.error(`Error in handleAcceptOfferCallback: ${err?.message}`);
+    }
+  }
+
+  private async handleReviseOfferCallback(
+    chatId: string,
+    offerId: string,
+    callbackQueryId: string,
+    messageId?: number,
+  ) {
+    try {
+      const offer = await this.offerRepo.findOne({
+        where: { id: offerId },
+        relations: { order: { client: true } },
+      });
+
+      if (!offer) {
+        await this.answerCallbackQuery(callbackQueryId, 'Offer not found.');
+        return;
+      }
+
+      offer.status = PriceOfferStatus.REVISION_REQUESTED;
+      await this.offerRepo.save(offer);
+
+      this.eventEmitter.emit('price-offer.revision-requested', { orderId: offer.order_id, offerId });
+
+      await this.answerCallbackQuery(callbackQueryId, 'Revision requested recorded.');
+
+      const promptText = `💬 *Revision Requested*\n\nPlease reply directly with your comments, feedback, or requested adjustments. Our team will review and update the proposal.`;
+      await this.sendMessage(chatId, promptText);
+
+      // 🔔 Notify admins
+      const clientName = offer.order.client?.full_name || 'Client';
+      const orderShortId = offer.order.id.slice(0, 8).toUpperCase();
+      await this.notifyAdmins(
+        `⚠️ *Client Requested Revision on Price Offer*\n\n` +
+        `👤 *Client:* ${clientName}\n` +
+        `📋 *Order:* \`#${orderShortId}\`\n` +
+        `Please check the incoming messages to assist the client.`,
+      );
+    } catch (err: any) {
+      this.logger.error(`Error in handleReviseOfferCallback: ${err?.message}`);
+    }
   }
 }

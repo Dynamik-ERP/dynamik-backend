@@ -131,6 +131,32 @@ export class OrdersService {
     });
   }
 
+  async assignDesigner(orderId: string, designerId: string, assignedById: string) {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('Order not found');
+    const designer = await this.userRepo.findOne({ where: { id: designerId, role: UserRole.DESIGN } });
+    if (!designer) throw new BadRequestException('Designer not found or user is not a designer');
+
+    order.handled_by_designer_id = designerId;
+    await this.orderRepo.save(order);
+
+    // Also update client assignment
+    let assignment = await this.assignmentRepo.findOne({ where: { client_id: order.client_id } });
+    if (assignment) {
+      assignment.designer_id = designerId;
+      assignment.assigned_by = assignedById;
+    } else {
+      assignment = this.assignmentRepo.create({
+        client_id: order.client_id,
+        designer_id: designerId,
+        assigned_by: assignedById,
+      });
+    }
+    await this.assignmentRepo.save(assignment);
+
+    return this.findOne(orderId);
+  }
+
   async cancel(id: string) {
     const order = await this.orderRepo.findOne({ where: { id } });
     if (!order) throw new NotFoundException('Order not found');

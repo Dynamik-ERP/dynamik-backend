@@ -43,6 +43,16 @@ export class OrdersController {
     return this.ordersService.update(id, dto);
   }
 
+  @Post(':id/assign-designer')
+  @Roles(UserRole.ADMIN)
+  assignDesigner(
+    @Param('id', UuidValidationPipe) id: string,
+    @Body('designer_id') designerId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.ordersService.assignDesigner(id, designerId, user.id);
+  }
+
   @Post(':id/cancel')
   @Roles(UserRole.ADMIN)
   cancel(@Param('id', UuidValidationPipe) id: string) {

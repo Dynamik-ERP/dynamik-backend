@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../entities/user.entity.js';
 import { ClientDesignerAssignment } from '../../entities/client-designer-assignment.entity.js';
+import { Order } from '../../entities/order.entity.js';
 import { UserRole } from '../../entities/enums.js';
 import { AssignDesignerDto } from './dto/assign-designer.dto.js';
 
@@ -13,6 +14,8 @@ export class ClientsService {
     private readonly userRepo: Repository<User>,
     @InjectRepository(ClientDesignerAssignment)
     private readonly assignmentRepo: Repository<ClientDesignerAssignment>,
+    @InjectRepository(Order)
+    private readonly orderRepo: Repository<Order>,
   ) {}
 
   async assignDesigner(clientId: string, dto: AssignDesignerDto, assignedById: string) {
@@ -38,7 +41,17 @@ export class ClientsService {
       });
     }
 
-    return this.assignmentRepo.save(assignment);
+    const savedAssignment = await this.assignmentRepo.save(assignment);
+
+    // Persist handled_by_designer_id onto all orders of this client
+    await this.orderRepo
+      .createQueryBuilder()
+      .update(Order)
+      .set({ handled_by_designer_id: dto.designer_id })
+      .where('client_id = :clientId', { clientId })
+      .execute();
+
+    return savedAssignment;
   }
 
   async getDesigner(clientId: string) {
