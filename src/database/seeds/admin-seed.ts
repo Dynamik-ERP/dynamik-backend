@@ -6,15 +6,17 @@ import { UserRole } from '../../entities/enums.js';
 export async function seedAdmin(dataSource: DataSource): Promise<void> {
   const userRepo = dataSource.getRepository(User);
 
+  const password = process.env.ADMIN_SEED_PASSWORD || 'DynamikAdmin2026!';
+  const password_hash = await argon2.hash(password);
+
   const existingAdmin = await userRepo.findOne({ where: { role: UserRole.ADMIN } });
   if (existingAdmin) {
-    console.log('Admin user already exists, skipping seed.');
+    existingAdmin.password_hash = password_hash;
+    existingAdmin.email = process.env.ADMIN_SEED_EMAIL || 'admin@dynamik.com';
+    await userRepo.save(existingAdmin);
+    console.log(`Admin user password updated to match seed configuration.`);
     return;
   }
-
-  const password_hash = await argon2.hash(
-    process.env.ADMIN_SEED_PASSWORD || 'Admin123!',
-  );
 
   const admin = userRepo.create({
     full_name: process.env.ADMIN_SEED_NAME || 'System Admin',

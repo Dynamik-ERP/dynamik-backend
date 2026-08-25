@@ -62,7 +62,8 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document);
 
-  if (configService.get('SEED_ADMIN') === 'true') {
+  const seedFlag = configService.get<string>('SEED_ADMIN');
+  if (seedFlag !== 'false') {
     const dataSource = app.get(DataSource);
     await seedAdmin(dataSource);
   }
