@@ -34,7 +34,20 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin: parseCorsOrigins(configService.get<string>('CORS_ORIGIN')),
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      if (!origin) return callback(null, true);
+      const configured = configService.get<string>('CORS_ORIGIN');
+      if (
+        !configured ||
+        configured === '*' ||
+        configured.includes(origin) ||
+        origin.endsWith('.onrender.com') ||
+        origin.includes('localhost')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
     exposedHeaders: ['X-Request-Id'],
   });
