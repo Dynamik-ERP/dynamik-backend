@@ -154,27 +154,26 @@ export class TelegramService implements OnModuleInit {
       return staffWelcome;
     }
 
-    // Deep link: /start link_admin — auto-link the first admin without a telegram_chat_id
+    // Deep link: /start link_admin — auto-link the admin account
     if (deepLinkParam === 'link_admin') {
-      const unlinkedAdmin = await this.userRepo.findOne({
-        where: { role: UserRole.ADMIN, telegram_chat_id: undefined as any },
-      });
-      // Try query builder for null check
-      const admin = unlinkedAdmin || await this.userRepo
-        .createQueryBuilder('user')
-        .where('user.role = :role', { role: UserRole.ADMIN })
-        .andWhere('user.telegram_chat_id IS NULL')
-        .getOne();
-
+      const admin = await this.userRepo.findOne({ where: { role: UserRole.ADMIN } });
       if (admin) {
+        // Clear any existing collision first
+        await this.userRepo
+          .createQueryBuilder()
+          .update(User)
+          .set({ telegram_chat_id: null })
+          .where('telegram_chat_id = :chatId AND id != :adminId', { chatId, adminId: admin.id })
+          .execute();
+
         admin.telegram_chat_id = chatId;
         await this.userRepo.save(admin);
         const msg = `✅ Admin account linked!\n\n👤 ${admin.full_name}\n📧 ${admin.email}\n🔧 Role: ADMIN\n\nYou will now receive real-time Telegram notifications for:\n• New client registrations\n• Incoming client messages\n• Order updates`;
-        await this.sendMessageWithKeyboard(chatId, msg, { remove_keyboard: true });
-        return msg;
-      } else {
-        const msg = `⚠️ No unlinked admin account found. All admin accounts are already linked to Telegram.`;
-        await this.sendRelayMessage(chatId, msg);
+        try {
+          await this.sendMessageWithKeyboard(chatId, msg, { remove_keyboard: true });
+        } catch (e) {
+          this.logger.warn(`Could not send welcome to ${chatId}: ${e.message}`);
+        }
         return msg;
       }
     }
@@ -207,13 +206,28 @@ export class TelegramService implements OnModuleInit {
     if (!user) {
       throw new Error('User not found');
     }
+
+    // Clear any collision on telegram_chat_id from other rows (e.g. temp client rows)
+    await this.userRepo
+      .createQueryBuilder()
+      .update(User)
+      .set({ telegram_chat_id: null })
+      .where('telegram_chat_id = :chatId AND id != :userId', { chatId: telegramChatId, userId })
+      .execute();
+
     user.telegram_chat_id = telegramChatId;
     const saved = await this.userRepo.save(user);
-    await this.sendMessageWithKeyboard(
-      telegramChatId,
-      `✅ Your Telegram account has been linked to Dynamik ERP staff profile: ${user.full_name} (${user.role.toUpperCase()}). You will now receive live alerts here.`,
-      { remove_keyboard: true },
-    );
+
+    try {
+      await this.sendMessageWithKeyboard(
+        telegramChatId,
+        `✅ Your Telegram account has been linked to Dynamik ERP staff profile: ${user.full_name} (${user.role.toUpperCase()}). You will now receive live alerts here.`,
+        { remove_keyboard: true },
+      );
+    } catch (err: any) {
+      this.logger.warn(`Could not send Telegram message to ${telegramChatId}: ${err.message}`);
+    }
+
     return saved;
   }
 
