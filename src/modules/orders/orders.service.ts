@@ -182,7 +182,7 @@ export class OrdersService {
     const hasApprovedPrice = order.priceOffers?.some((po) => po.status === 'approved');
     const hasApprovedDesign = order.designs?.some((d) => d.status === 'approved');
 
-    if (hasApprovedPrice && hasApprovedDesign && order.status === OrderStatus.IN_PROGRESS) {
+    if (hasApprovedPrice && hasApprovedDesign && (order.status === OrderStatus.IN_PROGRESS || order.status === OrderStatus.DRAFT)) {
       order.status = OrderStatus.READY_FOR_PRODUCTION;
       await this.orderRepo.save(order);
       this.eventEmitter.emit('order.ready_for_production', { orderId });
