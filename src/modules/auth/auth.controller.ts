@@ -70,12 +70,28 @@ export class AuthController {
   }
 
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
+  @SkipCsrf()
   @HttpCode(HttpStatus.NO_CONTENT)
-  async logout(@CurrentUser() user: User, @Res({ passthrough: true }) res: Response) {
-    await this.authService.logout(user.id);
-    res.clearCookie('access_token', { path: '/' });
-    res.clearCookie('refresh_token', { path: '/' });
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const user = (req as any).user;
+    if (user?.id) {
+      await this.authService.logout(user.id);
+    }
+    const isProduction = this.configService.get<string>('NODE_ENV') === 'production';
+    const sameSite = isProduction ? ('none' as const) : ('lax' as const);
+    const cookieOptions = {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite,
+      path: '/',
+    };
+    res.clearCookie('access_token', cookieOptions);
+    res.clearCookie('refresh_token', cookieOptions);
+    res.clearCookie('csrf_token', {
+      secure: isProduction,
+      sameSite,
+      path: '/',
+    });
   }
 
   @Get('me')
