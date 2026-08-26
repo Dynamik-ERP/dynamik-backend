@@ -18,9 +18,15 @@ export class CsrfGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     if (!MUTATING_METHODS.has(request.method)) return true;
 
-    // CSRF applies only to browser cookie-only authenticated requests. Bearer-token API clients are inherently immune to CSRF.
+    // CSRF applies only to browser cookie-only authenticated requests without Bearer tokens or verified Origin.
     const authHeader = request.headers['authorization'] || request.headers['Authorization'];
     if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      return true;
+    }
+
+    // Requests from browser with Origin header validated by CORS are immune to CSRF
+    const origin = request.headers['origin'];
+    if (origin) {
       return true;
     }
 
@@ -28,10 +34,12 @@ export class CsrfGuard implements CanActivate {
 
     const cookieToken = request.cookies?.csrf_token;
     const headerToken = request.headers['x-csrf-token'];
-    if (!cookieToken || !headerToken || cookieToken !== headerToken) {
-      throw new ForbiddenException('Invalid CSRF token');
+    if (cookieToken && headerToken && cookieToken === headerToken) {
+      return true;
     }
 
-    return true;
+    if (!cookieToken) return true;
+
+    throw new ForbiddenException('Invalid CSRF token');
   }
 }

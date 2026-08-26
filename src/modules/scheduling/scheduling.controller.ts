@@ -18,7 +18,7 @@ export class SchedulingController {
   constructor(private readonly schedulingService: SchedulingService) {}
 
   @Post('orders/:orderId/schedule')
-  @Roles(UserRole.OPERATIONS)
+  @Roles(UserRole.OPERATIONS, UserRole.ADMIN)
   createSchedule(
     @Param('orderId', UuidValidationPipe) orderId: string,
     @Body() dto: CreateScheduleDto,
